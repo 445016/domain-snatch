@@ -1,3 +1,4 @@
+# 默认配置。设置 APP_ENV 可加载 domain-{APP_ENV}.yaml（如 APP_ENV=prod 加载 domain-prod.yaml）
 Name: domain
 Host: 0.0.0.0
 Port: 8888
@@ -28,10 +29,10 @@ Aliyun:
 
 # GoDaddy API 配置（用于域名抢注）
 GoDaddy:
-  APIKey: "YOUR_GODADDY_API_KEY"
-  APISecret: "YOUR_GODADDY_API_SECRET"
-  Sandbox: true  # true=沙箱环境测试, false=生产环境
-  Enabled: false
+  APIKey: "3mM44YwfEH95Wq_GhgRhMXawE79QfbeVkPWgz"
+  APISecret: "TJuEoEjjr2GVBe2ZnxE3k8"
+  Sandbox: false  # true=沙箱环境测试, false=生产环境
+  Enabled: true
 
 # 自动抢注配置
 AutoSnatch:
@@ -46,13 +47,13 @@ AutoSnatch:
     PendingDelete: 300     # 待删除: 每5分钟
   # 抢注联系人信息（GoDaddy API 需要）
   Contact:
-    FirstName: "Your"
-    LastName: "Name"
-    Email: "your@email.com"
-    Phone: "+1.1234567890"
-    Organization: ""
-    Address1: "123 Main St"
-    City: "City"
-    State: "State"
-    PostalCode: "12345"
-    Country: "US"
+    FirstName: "kevin"
+    LastName: "zhaokun"
+    Email: "follow_kevin@126.com"
+    Phone: "+86.18910271624"
+    Organization: "beijing software company"
+    Address1: "beijing"
+    City: "beijing"
+    State: "beijing"
+    PostalCode: "100000"
+    Country: "CN"

@@ -12,6 +12,7 @@ import (
 	"domain-snatch/pkg/feishu"
 	"domain-snatch/pkg/godaddy"
 	"domain-snatch/pkg/lock"
+	"domain-snatch/pkg/snatch"
 	"domain-snatch/pkg/whois"
 
 	"github.com/zeromicro/go-zero/core/logx"
@@ -64,6 +65,7 @@ type CronService struct {
 	notifyLogsModel     model.NotifyLogsModel
 	godaddyClient       *godaddy.Client
 	autoSnatchConfig    *AutoSnatchConfig
+	delayQueue          *snatch.DelayQueue
 }
 
 func NewCronService(dataSource string) *CronService {
@@ -88,6 +90,46 @@ func (s *CronService) SetGoDaddyClient(config GoDaddyConfig) {
 func (s *CronService) SetAutoSnatchConfig(config AutoSnatchConfig) {
 	s.autoSnatchConfig = &config
 	logx.Infof("[Cron] AutoSnatch config set, enabled=%v, maxRetries=%d", config.Enabled, config.MaxRetries)
+}
+
+// SetDelayQueue 设置抢注延迟队列（用于按 delete_date 定时执行）
+func (s *CronService) SetDelayQueue(queue *snatch.DelayQueue) {
+	s.delayQueue = queue
+	if queue != nil {
+		logx.Info("[Cron] Delay queue set, enqueue on status update when pending_delete with delete_date")
+	}
+}
+
+// buildExecutor 根据当前配置与通知设置构建统一抢注执行器（先发抢前通知再执行）
+func (s *CronService) buildExecutor(settings *model.NotifySettings) *snatch.Executor {
+	exec := &snatch.Executor{
+		GodaddyClient: s.godaddyClient,
+		SnatchTasks:   s.snatchTasksModel,
+		NotifyLogs:    s.notifyLogsModel,
+		MaxRetries:    3,
+	}
+	if settings != nil && settings.Enabled == 1 && settings.WebhookUrl != "" {
+		exec.WebhookURL = settings.WebhookUrl
+	}
+	if s.autoSnatchConfig != nil {
+		exec.MaxRetries = s.autoSnatchConfig.MaxRetries
+		if exec.MaxRetries <= 0 {
+			exec.MaxRetries = 3
+		}
+		exec.Contact = snatch.Contact{
+			FirstName:    s.autoSnatchConfig.Contact.FirstName,
+			LastName:     s.autoSnatchConfig.Contact.LastName,
+			Email:        s.autoSnatchConfig.Contact.Email,
+			Phone:        s.autoSnatchConfig.Contact.Phone,
+			Organization: s.autoSnatchConfig.Contact.Organization,
+			Address1:     s.autoSnatchConfig.Contact.Address1,
+			City:         s.autoSnatchConfig.Contact.City,
+			State:        s.autoSnatchConfig.Contact.State,
+			PostalCode:   s.autoSnatchConfig.Contact.PostalCode,
+			Country:      s.autoSnatchConfig.Contact.Country,
+		}
+	}
+	return exec
 }
 
 // getCheckIntervalForPendingDelete 根据距离可注册时间的远近动态调整检测间隔
@@ -461,7 +503,7 @@ func (s *CronService) RunExpireNotify() {
 	logx.Infof("[Cron] Expire notification completed, notified %d domains", len(expiring))
 }
 
-// RunSnatchCheck 抢注任务检查（支持自动注册）
+// RunSnatchCheck 抢注任务检查（支持自动注册）；统一通过 snatch.Executor 执行，先发抢前通知再 WHOIS/注册
 func (s *CronService) RunSnatchCheck() {
 	ctx := context.Background()
 	logx.Info("[Cron] Starting snatch task check...")
@@ -473,146 +515,55 @@ func (s *CronService) RunSnatchCheck() {
 	}
 
 	settings, _ := s.notifySettingsModel.FindFirst(ctx)
+	exec := s.buildExecutor(settings)
 
 	total := len(tasks)
 	for index, task := range tasks {
 		logx.Infof("[Cron][Snatch] checking (%d/%d), id=%d, domain=%s, status=%s, autoRegister=%d",
 			index+1, total, task.Id, task.Domain, task.Status, task.AutoRegister)
-
 		start := time.Now()
-		result, err := whois.QueryWithRateLimit(task.Domain)
-		if err != nil {
-			logx.Errorf("[Cron][Snatch] WHOIS query failed, domain=%s, err=%v", task.Domain, err)
-			task.LastError = sql.NullString{String: err.Error(), Valid: true}
-			s.snatchTasksModel.Update(ctx, task)
-			continue
-		}
-
-		if result.CanRegister {
-			// 域名可注册
-			if task.AutoRegister == 1 && s.godaddyClient != nil && s.autoSnatchConfig != nil && s.autoSnatchConfig.Enabled {
-				// 自动注册
-				s.tryAutoRegister(ctx, task, settings)
-			} else {
-				// 手动注册模式
-				task.Status = "processing"
-				task.Result = sql.NullString{String: "域名已可注册，请尽快手动完成注册", Valid: true}
-				s.snatchTasksModel.Update(ctx, task)
-
-				// 发送通知
-				if settings != nil && settings.Enabled == 1 && settings.WebhookUrl != "" {
-					client := feishu.NewClient(settings.WebhookUrl)
-					client.SendSnatchResultCard(task.Domain, "processing", "域名已可注册，请尽快手动完成注册")
-
-					s.notifyLogsModel.Insert(ctx, &model.NotifyLogs{
-						DomainId:   task.DomainId,
-						Domain:     task.Domain,
-						NotifyType: "snatch_result",
-						Channel:    "feishu",
-						Content:    sql.NullString{String: fmt.Sprintf("域名 %s 已可注册", task.Domain), Valid: true},
-						Status:     "sent",
-					})
-				}
-			}
-
-			logx.Infof("[Cron][Snatch] domain can register, domain=%s, taskId=%d, autoRegister=%d, cost=%s",
-				task.Domain, task.Id, task.AutoRegister, time.Since(start).String())
+		if err := exec.Execute(ctx, task); err != nil {
+			logx.Errorf("[Cron][Snatch] execute failed, domain=%s, err=%v", task.Domain, err)
 		} else {
-			// 域名还不可注册，更新状态信息
-			logx.Infof("[Cron][Snatch] domain not available yet, domain=%s, status=%s, whoisStatus=%s, cost=%s",
-				task.Domain, result.Status, result.WhoisStatus, time.Since(start).String())
+			logx.Infof("[Cron][Snatch] done, domain=%s, taskId=%d, cost=%s", task.Domain, task.Id, time.Since(start).String())
 		}
 	}
 
 	logx.Info("[Cron] Snatch task check completed")
 }
 
-// tryAutoRegister 尝试自动注册域名
-func (s *CronService) tryAutoRegister(ctx context.Context, task *model.SnatchTasks, settings *model.NotifySettings) {
-	if s.godaddyClient == nil || s.autoSnatchConfig == nil {
+// RunDelayQueueWorker 延迟队列消费：循环取出到点任务并执行抢注（先发抢前通知再执行）
+func (s *CronService) RunDelayQueueWorker(queue *snatch.DelayQueue) {
+	if queue == nil {
 		return
 	}
-
-	maxRetries := s.autoSnatchConfig.MaxRetries
-	if maxRetries <= 0 {
-		maxRetries = 3
-	}
-
-	// 检查重试次数
-	if task.RetryCount >= int64(maxRetries) {
-		task.Status = "failed"
-		task.Result = sql.NullString{String: fmt.Sprintf("自动注册失败，已达最大重试次数 %d", maxRetries), Valid: true}
-		s.snatchTasksModel.Update(ctx, task)
-		logx.Errorf("[Cron][AutoRegister] max retries reached, domain=%s, retries=%d", task.Domain, task.RetryCount)
-		return
-	}
-
-	logx.Infof("[Cron][AutoRegister] attempting registration, domain=%s, retry=%d/%d",
-		task.Domain, task.RetryCount+1, maxRetries)
-
-	// 检查域名是否可用
-	availability, err := s.godaddyClient.CheckAvailable(task.Domain)
-	if err != nil {
-		task.RetryCount++
-		task.LastError = sql.NullString{String: fmt.Sprintf("检查可用性失败: %v", err), Valid: true}
-		s.snatchTasksModel.Update(ctx, task)
-		logx.Errorf("[Cron][AutoRegister] check availability failed, domain=%s, err=%v", task.Domain, err)
-		return
-	}
-
-	if !availability.Available {
-		task.RetryCount++
-		task.LastError = sql.NullString{String: "域名在 GoDaddy 不可注册", Valid: true}
-		s.snatchTasksModel.Update(ctx, task)
-		logx.Infof("[Cron][AutoRegister] domain not available on GoDaddy, domain=%s", task.Domain)
-		return
-	}
-
-	// 构建联系人信息
-	contact := godaddy.ContactInfo{
-		FirstName:    s.autoSnatchConfig.Contact.FirstName,
-		LastName:     s.autoSnatchConfig.Contact.LastName,
-		Email:        s.autoSnatchConfig.Contact.Email,
-		Phone:        s.autoSnatchConfig.Contact.Phone,
-		Organization: s.autoSnatchConfig.Contact.Organization,
-		Address1:     s.autoSnatchConfig.Contact.Address1,
-		City:         s.autoSnatchConfig.Contact.City,
-		State:        s.autoSnatchConfig.Contact.State,
-		PostalCode:   s.autoSnatchConfig.Contact.PostalCode,
-		Country:      s.autoSnatchConfig.Contact.Country,
-	}
-
-	// 尝试购买
-	purchaseResp, err := s.godaddyClient.Purchase(task.Domain, contact, 1)
-	if err != nil {
-		task.RetryCount++
-		task.LastError = sql.NullString{String: fmt.Sprintf("购买失败: %v", err), Valid: true}
-		s.snatchTasksModel.Update(ctx, task)
-		logx.Errorf("[Cron][AutoRegister] purchase failed, domain=%s, err=%v", task.Domain, err)
-		return
-	}
-
-	// 注册成功
-	task.Status = "success"
-	task.Result = sql.NullString{String: fmt.Sprintf("自动注册成功! OrderID: %d", purchaseResp.OrderID), Valid: true}
-	s.snatchTasksModel.Update(ctx, task)
-
-	logx.Infof("[Cron][AutoRegister] SUCCESS! domain=%s, orderId=%d", task.Domain, purchaseResp.OrderID)
-
-	// 发送成功通知
-	if settings != nil && settings.Enabled == 1 && settings.WebhookUrl != "" {
-		client := feishu.NewClient(settings.WebhookUrl)
-		client.SendSnatchResultCard(task.Domain, "success",
-			fmt.Sprintf("域名 %s 自动注册成功! OrderID: %d", task.Domain, purchaseResp.OrderID))
-
-		s.notifyLogsModel.Insert(ctx, &model.NotifyLogs{
-			DomainId:   task.DomainId,
-			Domain:     task.Domain,
-			NotifyType: "snatch_success",
-			Channel:    "feishu",
-			Content:    sql.NullString{String: fmt.Sprintf("域名 %s 自动注册成功", task.Domain), Valid: true},
-			Status:     "sent",
-		})
+	ctx := context.Background()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		taskID, ok, err := queue.Poll(ctx)
+		if err != nil {
+			logx.Errorf("[Cron][DelayQueue] poll error: %v", err)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		task, err := s.snatchTasksModel.FindOne(ctx, uint64(taskID))
+		if err != nil || task == nil {
+			logx.Infof("[Cron][DelayQueue] task not found or already done: taskId=%d", taskID)
+			continue
+		}
+		if task.Status != "pending" && task.Status != "processing" {
+			continue
+		}
+		settings, _ := s.notifySettingsModel.FindFirst(ctx)
+		exec := s.buildExecutor(settings)
+		if err := exec.Execute(ctx, task); err != nil {
+			logx.Errorf("[Cron][DelayQueue] execute failed, domain=%s, err=%v", task.Domain, err)
+		} else {
+			logx.Infof("[Cron][DelayQueue] executed, domain=%s, taskId=%d", task.Domain, taskID)
+		}
 	}
 }
 
@@ -646,20 +597,9 @@ func (s *CronService) RunPendingDeleteCheck() {
 
 			if result.CanRegister {
 				logx.Infof("[Cron][PendingDelete] domain released! domain=%s", task.Domain)
-				// 触发抢注逻辑
 				settings, _ := s.notifySettingsModel.FindFirst(ctx)
-				if task.AutoRegister == 1 {
-					s.tryAutoRegister(ctx, task, settings)
-				} else {
-					task.Status = "processing"
-					task.Result = sql.NullString{String: "域名已释放，可以注册！", Valid: true}
-					s.snatchTasksModel.Update(ctx, task)
-
-					if settings != nil && settings.Enabled == 1 && settings.WebhookUrl != "" {
-						client := feishu.NewClient(settings.WebhookUrl)
-						client.SendSnatchResultCard(task.Domain, "processing", "域名已释放，请立即手动注册！")
-					}
-				}
+				exec := s.buildExecutor(settings)
+				_ = exec.Execute(ctx, task)
 			}
 		}
 	}
@@ -1042,34 +982,10 @@ func (s *CronService) RunSnatchGuardian() {
 		}
 
 		if result.CanRegister {
-			// 域名可注册，立即执行自动注册
-			logx.Infof("[Cron][Guardian] Domain is available! Starting auto-register, domain=%s, taskId=%d",
-				task.Domain, task.Id)
-
-			if s.godaddyClient != nil && s.autoSnatchConfig != nil && s.autoSnatchConfig.Enabled {
-				s.tryAutoRegister(ctx, task, settings)
-			} else {
-				// 自动注册未配置，更新任务状态并发送通知
-				task.Status = "processing"
-				task.Result = sql.NullString{String: "域名已可注册，但自动注册未配置，请尽快手动完成注册", Valid: true}
-				s.snatchTasksModel.Update(ctx, task)
-
-				if settings != nil && settings.Enabled == 1 && settings.WebhookUrl != "" {
-					client := feishu.NewClient(settings.WebhookUrl)
-					client.SendSnatchResultCard(task.Domain, "processing", "域名已可注册，请立即手动完成注册！")
-
-					s.notifyLogsModel.Insert(ctx, &model.NotifyLogs{
-						DomainId:   task.DomainId,
-						Domain:     task.Domain,
-						NotifyType: "snatch_result",
-						Channel:    "feishu",
-						Content:    sql.NullString{String: fmt.Sprintf("域名 %s 已可注册（守护进程检测）", task.Domain), Valid: true},
-						Status:     "sent",
-					})
-				}
-			}
-
-			logx.Infof("[Cron][Guardian] Auto-register triggered, domain=%s, taskId=%d, cost=%s",
+			logx.Infof("[Cron][Guardian] Domain is available! Starting snatch, domain=%s, taskId=%d", task.Domain, task.Id)
+			exec := s.buildExecutor(settings)
+			_ = exec.Execute(ctx, task)
+			logx.Infof("[Cron][Guardian] Snatch triggered, domain=%s, taskId=%d, cost=%s",
 				task.Domain, task.Id, time.Since(start).String())
 		} else {
 			// 域名还不可注册，记录日志
@@ -1292,6 +1208,17 @@ func (s *CronService) RunStatusUpdateTask() {
 				logx.Infof("[Cron][StatusUpdate] [%d/%d] Sending notification for domain=%s, status=%s->%s",
 					checked, total, domain.Domain, oldStatus, result.Status)
 				s.notifyDomainStatus(ctx, domain, oldStatus, result.Status)
+			}
+			// 延迟队列：pending_delete 且已有 delete_date 时入队，到点由 worker 执行抢注
+			if s.delayQueue != nil && result.Status == whois.StatusPendingDelete && result.DeleteDate != nil {
+				task, _ := s.snatchTasksModel.FindOneByDomainId(ctx, uint64(latestDomain.Id))
+				if task != nil {
+					if err := s.delayQueue.Add(ctx, int64(task.Id), *result.DeleteDate); err != nil {
+						logx.Errorf("[Cron][StatusUpdate] delay queue add failed, domain=%s, taskId=%d, err=%v", domain.Domain, task.Id, err)
+					} else {
+						logx.Infof("[Cron][StatusUpdate] enqueued snatch task, domain=%s, taskId=%d, executeAt=%s", domain.Domain, task.Id, result.DeleteDate.Format("2006-01-02 15:04:05"))
+					}
+				}
 			}
 		}
 	}

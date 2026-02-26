@@ -10,18 +10,23 @@ import (
 	"domain-snatch/api/internal/handler"
 	"domain-snatch/api/internal/svc"
 	"domain-snatch/cron"
+	"domain-snatch/pkg/configutil"
+	"domain-snatch/pkg/snatch"
 
 	"github.com/zeromicro/go-zero/core/conf"
 	"github.com/zeromicro/go-zero/rest"
 )
 
-var configFile = flag.String("f", "etc/domain.yaml", "the config file")
+const defaultConfigPath = "etc/domain.yaml"
+
+var configFile = flag.String("f", defaultConfigPath, "config file path; overridden by APP_ENV when -f is default")
 
 func main() {
 	flag.Parse()
 
+	path := configutil.ResolveConfigPath(*configFile, defaultConfigPath)
 	var c config.Config
-	conf.MustLoad(*configFile, &c)
+	conf.MustLoad(path, &c)
 
 	server := rest.MustNewServer(c.RestConf, rest.WithCors("*"))
 	defer server.Stop()
@@ -45,22 +50,49 @@ func main() {
 
 	// 启动定时任务
 	cronSvc := cron.NewCronService(c.Mysql.DataSource)
-	go startCronJobs(cronSvc)
+	cronSvc.SetGoDaddyClient(cron.GoDaddyConfig{
+		APIKey:    c.GoDaddy.APIKey,
+		APISecret: c.GoDaddy.APISecret,
+		Sandbox:   c.GoDaddy.Sandbox,
+		Enabled:   c.GoDaddy.Enabled,
+	})
+	cronSvc.SetAutoSnatchConfig(cron.AutoSnatchConfig{
+		Enabled:    c.AutoSnatch.Enabled,
+		MaxRetries: c.AutoSnatch.MaxRetries,
+		CheckIntervals: cron.CheckIntervals{
+			Registered:    c.AutoSnatch.CheckIntervals.Registered,
+			Expired:       c.AutoSnatch.CheckIntervals.Expired,
+			GracePeriod:   c.AutoSnatch.CheckIntervals.GracePeriod,
+			Redemption:    c.AutoSnatch.CheckIntervals.Redemption,
+			PendingDelete: c.AutoSnatch.CheckIntervals.PendingDelete,
+		},
+		Contact: cron.ContactInfo{
+			FirstName:    c.AutoSnatch.Contact.FirstName,
+			LastName:     c.AutoSnatch.Contact.LastName,
+			Email:        c.AutoSnatch.Contact.Email,
+			Phone:        c.AutoSnatch.Contact.Phone,
+			Organization: c.AutoSnatch.Contact.Organization,
+			Address1:     c.AutoSnatch.Contact.Address1,
+			City:         c.AutoSnatch.Contact.City,
+			State:        c.AutoSnatch.Contact.State,
+			PostalCode:   c.AutoSnatch.Contact.PostalCode,
+			Country:      c.AutoSnatch.Contact.Country,
+		},
+	})
+	go startCronJobs(cronSvc, c)
 
-	fmt.Printf("Starting server at %s:%d...\n", c.Host, c.Port)
+	fmt.Printf("Starting server at %s:%d... (config: %s)\n", c.Host, c.Port, path)
 	server.Start()
 }
 
-func startCronJobs(cronSvc *cron.CronService) {
-	fmt.Println("[Cron] Starting cron jobs (only RunStatusUpdateTask)...")
+func startCronJobs(cronSvc *cron.CronService, c config.Config) {
+	fmt.Println("[Cron] Starting cron jobs (RunStatusUpdateTask + delay queue worker)...")
 
 	// 只运行状态更新任务（更新到期时间小于当前时间的域名状态）
 	go func() {
 		fmt.Println("[Cron] Status update task started (runs every 5 minutes)")
-		// 启动时立即执行一次
 		fmt.Printf("[Cron] Running initial status update task at %s\n", time.Now().Format("2006-01-02 15:04:05"))
 		cronSvc.RunStatusUpdateTask()
-
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
@@ -69,5 +101,14 @@ func startCronJobs(cronSvc *cron.CronService) {
 		}
 	}()
 
-	fmt.Println("[Cron] Cron job started successfully (only RunStatusUpdateTask)")
+	// 延迟队列：有 Redis 时启动，按计划时间执行抢注；状态更新中发现 pending_delete+delete_date 会入队
+	if len(c.Cache) > 0 {
+		rds := c.Cache[0].NewRedis()
+		queue := snatch.NewDelayQueue(rds)
+		cronSvc.SetDelayQueue(queue)
+		go cronSvc.RunDelayQueueWorker(queue)
+		fmt.Println("[Cron] Delay queue worker started (polls every 2s)")
+	}
+
+	fmt.Println("[Cron] Cron jobs started successfully")
 }

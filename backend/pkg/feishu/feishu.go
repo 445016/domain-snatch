@@ -120,6 +120,32 @@ func (c *Client) SendDomainAvailableCard(domains []DomainInfo) error {
 	return c.send(card)
 }
 
+// SendSnatchStartCard 发送「开始抢注」前通知（执行抢注前先发此通知）
+func (c *Client) SendSnatchStartCard(domain string) error {
+	card := map[string]interface{}{
+		"msg_type": "interactive",
+		"card": map[string]interface{}{
+			"header": map[string]interface{}{
+				"title": map[string]interface{}{
+					"tag":     "plain_text",
+					"content": "即将抢注",
+				},
+				"template": "blue",
+			},
+			"elements": []interface{}{
+				map[string]interface{}{
+					"tag": "div",
+					"text": map[string]interface{}{
+						"tag":     "lark_md",
+						"content": fmt.Sprintf("**域名**: %s\n**状态**: 开始抢注", domain),
+					},
+				},
+			},
+		},
+	}
+	return c.send(card)
+}
+
 // SendSnatchResultCard 发送抢注结果卡片消息
 func (c *Client) SendSnatchResultCard(domain, status, result string) error {
 	template := "blue"

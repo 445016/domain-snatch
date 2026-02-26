@@ -1,0 +1,56 @@
+# 生产环境示例（APP_ENV=prod 时自动加载；或 -f etc/domain-prod.yaml）
+# 部署前请替换所有 YOUR_* 占位符，勿提交真实密钥
+Name: domain
+Host: 0.0.0.0
+Port: 8888
+Timeout: 120000
+Log:
+  ServiceName: domain
+  Mode: file
+  Path: logs
+  Level: info
+  Compress: true
+  KeepDays: 30
+  StackCooldownMillis: 100
+
+Auth:
+  AccessSecret: "YOUR_ACCESS_SECRET"
+  AccessExpire: 86400
+
+Mysql:
+  DataSource: "YOUR_MYSQL_DSN"
+
+Cache:
+  - Host: "YOUR_REDIS_HOST:6379"
+
+Aliyun:
+  AccessKeyID: "YOUR_ALIYUN_KEY"
+  AccessKeySecret: "YOUR_ALIYUN_SECRET"
+  Enabled: false
+
+GoDaddy:
+  APIKey: "YOUR_GODADDY_API_KEY"
+  APISecret: "YOUR_GODADDY_API_SECRET"
+  Sandbox: false
+  Enabled: true
+
+AutoSnatch:
+  Enabled: false
+  MaxRetries: 3
+  CheckIntervals:
+    Registered: 86400
+    Expired: 14400
+    GracePeriod: 14400
+    Redemption: 3600
+    PendingDelete: 300
+  Contact:
+    FirstName: "YOUR_FIRST_NAME"
+    LastName: "YOUR_LAST_NAME"
+    Email: "YOUR_EMAIL"
+    Phone: "YOUR_PHONE"
+    Organization: ""
+    Address1: "YOUR_ADDRESS"
+    City: "YOUR_CITY"
+    State: "YOUR_STATE"
+    PostalCode: "YOUR_POSTAL_CODE"
+    Country: "CN"

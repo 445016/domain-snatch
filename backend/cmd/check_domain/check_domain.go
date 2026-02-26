@@ -71,7 +71,8 @@ func init() {
 func main() {
 	flag.Parse()
 
-	dataSource, err := configutil.LoadDataSource(*configFile)
+	configPath := configutil.ResolveConfigPath(*configFile, "api/etc/domain.yaml")
+	dataSource, err := configutil.LoadDataSource(configPath)
 	if err != nil {
 		log.Fatal(err)
 	}

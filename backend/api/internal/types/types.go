@@ -45,6 +45,15 @@ type DeleteSnatchTaskReq struct {
 	Id int64 `path:"id"`
 }
 
+type ExecuteSnatchReq struct {
+	Domain string `json:"domain,optional"`
+	TaskId int64  `json:"taskId,optional"`
+}
+
+type ExecuteSnatchResp struct {
+	Msg string `json:"msg"`
+}
+
 type DomainCheckReq struct {
 	Ids []int64 `json:"ids"`
 }

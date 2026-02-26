@@ -17,6 +17,7 @@ type (
 		Count(ctx context.Context, status string) (int64, error)
 		CountByStatus(ctx context.Context, status string) (int64, error)
 		FindPending(ctx context.Context) ([]*SnatchTasks, error)
+		FindOneByDomainId(ctx context.Context, domainId uint64) (*SnatchTasks, error)
 	}
 
 	customSnatchTasksModel struct {
@@ -74,4 +75,18 @@ func (m *customSnatchTasksModel) FindPending(ctx context.Context) ([]*SnatchTask
 	var resp []*SnatchTasks
 	err := m.conn.QueryRowsCtx(ctx, &resp, query)
 	return resp, err
+}
+
+func (m *customSnatchTasksModel) FindOneByDomainId(ctx context.Context, domainId uint64) (*SnatchTasks, error) {
+	query := fmt.Sprintf("SELECT %s FROM %s WHERE `domain_id` = ? AND `status` IN ('pending','processing') ORDER BY `id` DESC LIMIT 1", snatchTasksRows, m.table)
+	var resp SnatchTasks
+	err := m.conn.QueryRowCtx(ctx, &resp, query, domainId)
+	switch err {
+	case nil:
+		return &resp, nil
+	case sqlx.ErrNotFound:
+		return nil, ErrNotFound
+	default:
+		return nil, err
+	}
 }

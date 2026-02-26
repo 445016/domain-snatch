@@ -3,9 +3,33 @@ package configutil
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/zeromicro/go-zero/core/conf"
 )
+
+// ResolveConfigPath 支持多环境：当 explicitPath 等于 defaultPath 时，若设置了 APP_ENV 则优先使用同目录下的 {name}-{APP_ENV}.yaml。
+// 例如 defaultPath=etc/domain.yaml、APP_ENV=prod 且存在 etc/domain-prod.yaml 时返回 etc/domain-prod.yaml。
+func ResolveConfigPath(explicitPath, defaultPath string) string {
+	if explicitPath != defaultPath {
+		return explicitPath
+	}
+	env := strings.TrimSpace(os.Getenv("APP_ENV"))
+	if env == "" {
+		return explicitPath
+	}
+	dir := filepath.Dir(explicitPath)
+	base := filepath.Base(explicitPath)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	envPath := filepath.Join(dir, name+"-"+env+ext)
+	if _, err := os.Stat(envPath); err == nil {
+		return envPath
+	}
+	return explicitPath
+}
 
 // DBConfig 仅包含数据库连接配置，与 api/etc/domain.yaml 中 Mysql 段结构一致。
 type DBConfig struct {
