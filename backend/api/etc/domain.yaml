@@ -1,0 +1,58 @@
+Name: domain
+Host: 0.0.0.0
+Port: 8888
+Timeout: 120000
+Log:
+  ServiceName: domain
+  Mode: file
+  Path: logs
+  Level: info
+  Compress: true
+  KeepDays: 7
+  StackCooldownMillis: 100
+
+Auth:
+  AccessSecret: "domain-snatch-secret-key-2026"
+  AccessExpire: 86400
+
+Mysql:
+  DataSource: "root:123456@tcp(127.0.0.1:3306)/domain_snatch?charset=utf8mb4&parseTime=true&loc=Local&innodb_lock_wait_timeout=2&maxAllowedPacket=0"
+
+Cache:
+  - Host: "127.0.0.1:6379"
+
+Aliyun:
+  AccessKeyID: "YOUR_ACCESS_KEY_ID"
+  AccessKeySecret: "YOUR_ACCESS_KEY_SECRET"
+  Enabled: false
+
+# GoDaddy API 配置（用于域名抢注）
+GoDaddy:
+  APIKey: "YOUR_GODADDY_API_KEY"
+  APISecret: "YOUR_GODADDY_API_SECRET"
+  Sandbox: true  # true=沙箱环境测试, false=生产环境
+  Enabled: false
+
+# 自动抢注配置
+AutoSnatch:
+  Enabled: false
+  MaxRetries: 3
+  # 不同状态的检测间隔（秒）
+  CheckIntervals:
+    Registered: 86400      # 已注册: 每天检测
+    Expired: 14400         # 已过期: 每4小时
+    GracePeriod: 14400     # 宽限期: 每4小时
+    Redemption: 3600       # 赎回期: 每1小时
+    PendingDelete: 300     # 待删除: 每5分钟
+  # 抢注联系人信息（GoDaddy API 需要）
+  Contact:
+    FirstName: "Your"
+    LastName: "Name"
+    Email: "your@email.com"
+    Phone: "+1.1234567890"
+    Organization: ""
+    Address1: "123 Main St"
+    City: "City"
+    State: "State"
+    PostalCode: "12345"
+    Country: "US"

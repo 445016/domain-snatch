@@ -1,0 +1,16 @@
+[Unit]
+Description=Domain Snatch Platform
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=dyxc
+WorkingDirectory=/Users/dyxc/Desktop/xj/backend/api
+ExecStart=/usr/local/go/bin/go run domain.go -f etc/domain.yaml
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/domain-snatch.log
+StandardError=append:/var/log/domain-snatch.log
+
+[Install]
+WantedBy=multi-user.target

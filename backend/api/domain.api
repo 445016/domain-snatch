@@ -1,0 +1,281 @@
+syntax = "v1"
+
+info (
+	title:   "Domain Snatch Platform API"
+	desc:    "域名抢注监控平台"
+	author:  "xj"
+	version: "1.0"
+)
+
+// ==================== 类型定义 ====================
+// --- Auth ---
+type (
+	LoginReq {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	LoginResp {
+		Token    string `json:"token"`
+		ExpireAt int64  `json:"expireAt"`
+	}
+	UserInfoResp {
+		Id       int64  `json:"id"`
+		Username string `json:"username"`
+		Role     string `json:"role"`
+	}
+)
+
+// --- Domain ---
+type (
+	DomainItem {
+		Id              int64                `json:"id"`
+		Domain          string               `json:"domain"`
+		Status          string               `json:"status"`
+		ExpiryDate      string               `json:"expiryDate"`
+		CreationDate    string               `json:"creationDate"`
+		DeleteDate      string               `json:"deleteDate"`
+		Registrar       string               `json:"registrar"`
+		WhoisStatus     string               `json:"whoisStatus"`
+		Monitor         int64                `json:"monitor"`
+		LastChecked     string               `json:"lastChecked"`
+		CreatedAt       string               `json:"createdAt"`
+		LifecycleStages *LifecycleStagesItem `json:"lifecycleStages,optional"`
+	}
+	LifecycleStagesItem {
+		ExpiryDate         string `json:"expiryDate"`
+		GracePeriodEnd     string `json:"gracePeriodEnd,optional"`
+		RedemptionStart    string `json:"redemptionStart,optional"`
+		RedemptionEnd      string `json:"redemptionEnd,optional"`
+		PendingDeleteStart string `json:"pendingDeleteStart,optional"`
+		PendingDeleteEnd   string `json:"pendingDeleteEnd,optional"`
+		AvailableDate      string `json:"availableDate,optional"`
+	}
+	DomainListReq {
+		Page        int64  `form:"page,default=1"`
+		PageSize    int64  `form:"pageSize,default=20"`
+		Status      string `form:"status,optional"`
+		Keyword     string `form:"keyword,optional"`
+		Monitor     int64  `form:"monitor,optional,default=-1"`
+		ExpiryStart string `form:"expiryStart,optional"`
+		ExpiryEnd   string `form:"expiryEnd,optional"`
+		SortField   string `form:"sortField,optional,default=expiry_date"`
+		SortOrder   string `form:"sortOrder,optional,default=asc"`
+	}
+	DomainListResp {
+		Total int64        `json:"total"`
+		List  []DomainItem `json:"list"`
+	}
+	AddDomainReq {
+		Domain string `json:"domain"`
+	}
+	AddDomainResp {
+		Id int64 `json:"id"`
+	}
+	DeleteDomainReq {
+		Id int64 `path:"id"`
+	}
+	ToggleMonitorReq {
+		Id      int64 `path:"id"`
+		Monitor int64 `json:"monitor"`
+	}
+	DomainCheckReq {
+		Ids []int64 `json:"ids"`
+	}
+	DomainCheckResp {
+		Count int64        `json:"count"`
+		List  []DomainItem `json:"list,optional"`
+	}
+	ImportDomainResp {
+		Total   int64 `json:"total"`
+		Success int64 `json:"success"`
+		Failed  int64 `json:"failed"`
+	}
+)
+
+// --- Whois ---
+type (
+	WhoisQueryReq {
+		Domain string `json:"domain"`
+	}
+	WhoisQueryResp {
+		Domain       string `json:"domain"`
+		Status       string `json:"status"`
+		ExpiryDate   string `json:"expiryDate"`
+		CreationDate string `json:"creationDate"`
+		DeleteDate   string `json:"deleteDate"`
+		Registrar    string `json:"registrar"`
+		WhoisStatus  string `json:"whoisStatus"`
+		CanRegister  bool   `json:"canRegister"`
+		WhoisRaw     string `json:"whoisRaw"`
+	}
+)
+
+// --- Snatch ---
+type (
+	SnatchTaskItem {
+		Id              int64  `json:"id"`
+		DomainId        int64  `json:"domainId"`
+		Domain          string `json:"domain"`
+		Status          string `json:"status"`
+		Priority        int64  `json:"priority"`
+		TargetRegistrar string `json:"targetRegistrar"`
+		AutoRegister    int64  `json:"autoRegister"`
+		RetryCount      int64  `json:"retryCount"`
+		LastError       string `json:"lastError"`
+		Result          string `json:"result"`
+		CreatedAt       string `json:"createdAt"`
+		UpdatedAt       string `json:"updatedAt"`
+	}
+	SnatchTaskListReq {
+		Page     int64  `form:"page,default=1"`
+		PageSize int64  `form:"pageSize,default=20"`
+		Status   string `form:"status,optional"`
+	}
+	SnatchTaskListResp {
+		Total int64            `json:"total"`
+		List  []SnatchTaskItem `json:"list"`
+	}
+	CreateSnatchTaskReq {
+		DomainId        int64  `json:"domainId"`
+		Domain          string `json:"domain"`
+		Priority        int64  `json:"priority,default=0"`
+		TargetRegistrar string `json:"targetRegistrar,optional"`
+		AutoRegister    int64  `json:"autoRegister,default=0"`
+	}
+	CreateSnatchTaskResp {
+		Id int64 `json:"id"`
+	}
+	UpdateSnatchTaskReq {
+		Id     int64  `path:"id"`
+		Status string `json:"status"`
+		Result string `json:"result,optional"`
+	}
+	DeleteSnatchTaskReq {
+		Id int64 `path:"id"`
+	}
+)
+
+// --- Notify ---
+type (
+	NotifySettingsResp {
+		Id         int64  `json:"id"`
+		WebhookUrl string `json:"webhookUrl"`
+		ExpireDays int64  `json:"expireDays"`
+		Enabled    int64  `json:"enabled"`
+	}
+	UpdateNotifySettingsReq {
+		WebhookUrl string `json:"webhookUrl"`
+		ExpireDays int64  `json:"expireDays"`
+		Enabled    int64  `json:"enabled"`
+	}
+)
+
+// --- Dashboard ---
+type (
+	DashboardStatsResp {
+		TotalDomains   int64 `json:"totalDomains"`
+		MonitorCount   int64 `json:"monitorCount"`
+		ExpiringSoon   int64 `json:"expiringSoon"`
+		AvailableCount int64 `json:"availableCount"`
+		SnatchPending  int64 `json:"snatchPending"`
+		SnatchSuccess  int64 `json:"snatchSuccess"`
+	}
+)
+
+type CommonResp {
+	Code int64  `json:"code"`
+	Msg  string `json:"msg"`
+}
+
+// ==================== 路由定义 ====================
+// 无需认证
+@server (
+	prefix: /api/auth
+)
+service domain {
+	@handler login
+	post /login (LoginReq) returns (LoginResp)
+}
+
+// 需要认证
+@server (
+	prefix: /api/auth
+	jwt:    Auth
+)
+service domain {
+	@handler userInfo
+	get /info returns (UserInfoResp)
+}
+
+@server (
+	prefix: /api/domains
+	jwt:    Auth
+)
+service domain {
+	@handler domainList
+	get / (DomainListReq) returns (DomainListResp)
+
+	@handler addDomain
+	post / (AddDomainReq) returns (AddDomainResp)
+
+	@handler deleteDomain
+	delete /:id (DeleteDomainReq) returns (CommonResp)
+
+	@handler toggleMonitor
+	put /:id/monitor (ToggleMonitorReq) returns (CommonResp)
+
+	@handler domainCheck
+	post /check (DomainCheckReq) returns (DomainCheckResp)
+
+	@handler importDomain
+	post /import returns (ImportDomainResp)
+}
+
+@server (
+	prefix: /api/whois
+	jwt:    Auth
+)
+service domain {
+	@handler whoisQuery
+	post /query (WhoisQueryReq) returns (WhoisQueryResp)
+}
+
+@server (
+	prefix: /api/snatch/tasks
+	jwt:    Auth
+)
+service domain {
+	@handler snatchTaskList
+	get / (SnatchTaskListReq) returns (SnatchTaskListResp)
+
+	@handler createSnatchTask
+	post / (CreateSnatchTaskReq) returns (CreateSnatchTaskResp)
+
+	@handler updateSnatchTask
+	put /:id (UpdateSnatchTaskReq) returns (CommonResp)
+
+	@handler deleteSnatchTask
+	delete /:id (DeleteSnatchTaskReq) returns (CommonResp)
+}
+
+@server (
+	prefix: /api/notify
+	jwt:    Auth
+)
+service domain {
+	@handler getNotifySettings
+	get /settings returns (NotifySettingsResp)
+
+	@handler updateNotifySettings
+	put /settings (UpdateNotifySettingsReq) returns (CommonResp)
+}
+
+@server (
+	prefix: /api/dashboard
+	jwt:    Auth
+)
+service domain {
+	@handler dashboardStats
+	get /stats returns (DashboardStatsResp)
+}
+

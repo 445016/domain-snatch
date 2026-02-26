@@ -1,0 +1,20 @@
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /domain-snatch ./api/domain.go
+
+FROM alpine:3.19
+
+RUN apk add --no-cache whois ca-certificates tzdata
+ENV TZ=Asia/Shanghai
+
+WORKDIR /app
+COPY --from=builder /domain-snatch .
+COPY api/etc/domain.yaml etc/domain.yaml
+
+EXPOSE 8888
+CMD ["./domain-snatch", "-f", "etc/domain.yaml"]
