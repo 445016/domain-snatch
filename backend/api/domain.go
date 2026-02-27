@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"domain-snatch/api/internal/config"
@@ -27,6 +28,10 @@ func main() {
 	path := configutil.ResolveConfigPath(*configFile, defaultConfigPath)
 	var c config.Config
 	conf.MustLoad(path, &c)
+	// 日志与配置共用目录层级：统一写到 backend/logs（与 backend/etc 同级）
+	if c.Log.Path != "" {
+		c.Log.Path = filepath.Join(filepath.Dir(filepath.Dir(path)), "logs")
+	}
 
 	server := rest.MustNewServer(c.RestConf, rest.WithCors("*"))
 	defer server.Stop()

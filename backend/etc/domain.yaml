@@ -6,7 +6,7 @@ Timeout: 120000
 Log:
   ServiceName: domain
   Mode: file
-  Path: logs
+  Path: logs   # 运行时统一解析为 backend/logs（与 etc 同级）
   Level: info
   Compress: true
   KeepDays: 7
