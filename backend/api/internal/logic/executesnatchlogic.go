@@ -96,6 +96,10 @@ func (l *ExecuteSnatchLogic) buildExecutor(settings *model.NotifySettings) *snat
 		exec.WebhookURL = settings.WebhookUrl
 	}
 	c := l.svcCtx.Config.AutoSnatch
+	exec.Platform = c.Platform
+	if exec.Platform == "" {
+		exec.Platform = snatch.PlatformGoDaddy
+	}
 	if c.MaxRetries > 0 {
 		exec.MaxRetries = c.MaxRetries
 	}

@@ -31,12 +31,13 @@ Aliyun:
 GoDaddy:
   APIKey: "3mM44YwfEH95Wq_GhgRhMXawE79QfbeVkPWgz"
   APISecret: "TJuEoEjjr2GVBe2ZnxE3k8"
-  Sandbox: false  # true=沙箱环境测试, false=生产环境
+  Sandbox: true  # true=沙箱环境测试, false=生产环境
   Enabled: true
 
 # 自动抢注配置
 AutoSnatch:
   Enabled: false
+  Platform: godaddy   # 抢注平台: godaddy / dropcatch（任务未填 target_registrar 时生效）
   MaxRetries: 3
   # 不同状态的检测间隔（秒）
   CheckIntervals:

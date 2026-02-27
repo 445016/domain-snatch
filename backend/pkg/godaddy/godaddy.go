@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 )
@@ -22,18 +23,23 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
-// ContactInfo 联系人信息（域名注册需要）
+// Address 地址（GoDaddy Contact 要求 addressMailing 为嵌套对象）
+type Address struct {
+	Address1   string `json:"address1"`
+	City       string `json:"city"`
+	State      string `json:"state"`
+	PostalCode string `json:"postalCode"`
+	Country    string `json:"country"` // ISO 3166-1 alpha-2, e.g., "US", "CN"
+}
+
+// ContactInfo 联系人信息（域名注册需要；addressMailing 必须为嵌套对象否则 API 422）
 type ContactInfo struct {
-	FirstName    string `json:"nameFirst"`
-	LastName     string `json:"nameLast"`
-	Email        string `json:"email"`
-	Phone        string `json:"phone"`
-	Organization string `json:"organization,omitempty"`
-	Address1     string `json:"addressMailing.address1"`
-	City         string `json:"addressMailing.city"`
-	State        string `json:"addressMailing.state"`
-	PostalCode   string `json:"addressMailing.postalCode"`
-	Country      string `json:"addressMailing.country"` // ISO 3166-1 alpha-2, e.g., "US", "CN"
+	FirstName       string  `json:"nameFirst"`
+	LastName        string  `json:"nameLast"`
+	Email           string  `json:"email"`
+	Phone           string  `json:"phone"`
+	Organization    string  `json:"organization,omitempty"`
+	AddressMailing  Address `json:"addressMailing"`
 }
 
 // AvailabilityResponse 域名可用性检查响应
@@ -96,23 +102,36 @@ func NewClient(apiKey, apiSecret string, sandbox bool) *Client {
 	}
 }
 
-// doRequest 执行 HTTP 请求
+const maxLogBody = 2048 // 请求/响应体日志最大长度，避免刷屏
+
+// doRequest 执行 HTTP 请求，并记录请求地址、参数、响应状态与结果
 func (c *Client) doRequest(method, path string, body interface{}) ([]byte, error) {
+	fullURL := c.BaseURL + path
 	var reqBody io.Reader
+	var reqBodyBytes []byte
 	if body != nil {
 		jsonData, err := json.Marshal(body)
 		if err != nil {
 			return nil, fmt.Errorf("marshal request body failed: %w", err)
 		}
+		reqBodyBytes = jsonData
 		reqBody = bytes.NewBuffer(jsonData)
 	}
 
-	req, err := http.NewRequest(method, c.BaseURL+path, reqBody)
+	log.Printf("[Godaddy] Request %s %s", method, fullURL)
+	if len(reqBodyBytes) > 0 {
+		logBody := string(reqBodyBytes)
+		if len(logBody) > maxLogBody {
+			logBody = logBody[:maxLogBody] + "...(truncated)"
+		}
+		log.Printf("[Godaddy] Request body: %s", logBody)
+	}
+
+	req, err := http.NewRequest(method, fullURL, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("create request failed: %w", err)
 	}
 
-	// 设置认证头
 	req.Header.Set("Authorization", fmt.Sprintf("sso-key %s:%s", c.APIKey, c.APISecret))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -128,11 +147,26 @@ func (c *Client) doRequest(method, path string, body interface{}) ([]byte, error
 		return nil, fmt.Errorf("read response failed: %w", err)
 	}
 
-	// 检查错误响应
+	respPreview := string(respBody)
+	if len(respPreview) > maxLogBody {
+		respPreview = respPreview[:maxLogBody] + "...(truncated)"
+	}
+	log.Printf("[Godaddy] Response status=%d body: %s", resp.StatusCode, respPreview)
+
+	// 检查错误响应（422 附带 fields；402 附带支付配置提示）
 	if resp.StatusCode >= 400 {
 		var errResp ErrorResponse
 		if err := json.Unmarshal(respBody, &errResp); err == nil && errResp.Message != "" {
-			return nil, fmt.Errorf("API error [%d]: %s - %s", resp.StatusCode, errResp.Code, errResp.Message)
+			msg := errResp.Message
+			if len(errResp.Fields) > 0 {
+				for _, f := range errResp.Fields {
+					msg += "; " + f.Path + ": " + f.Message
+				}
+			}
+			if resp.StatusCode == 402 && errResp.Code == "INVALID_PAYMENT_INFO" {
+				msg += "（OTE 环境需在 GoDaddy 开发者账号下为测试环境绑定支付方式，或联系 GoDaddy 支持开通 OTE 预充值）"
+			}
+			return nil, fmt.Errorf("API error [%d]: %s - %s", resp.StatusCode, errResp.Code, msg)
 		}
 		return nil, fmt.Errorf("API error [%d]: %s", resp.StatusCode, string(respBody))
 	}

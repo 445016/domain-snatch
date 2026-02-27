@@ -1,0 +1,55 @@
+# 阿里云云效 Flow 流水线：构建 Go 后端并部署到 ECS
+# 使用前请在云效控制台：1）添加流水线源（代码仓库） 2）创建主机组并绑定 ECS 3）替换下方占位符
+
+name: domain-snatch-deploy
+sources:
+  main:
+    type: codeup
+    name: 代码源
+    branch: master
+    # endpoint、certificate 在云效「添加流水线源」时配置，此处可省略
+stages:
+  build_stage:
+    name: 构建
+    jobs:
+      build_job:
+        name: Go 构建
+        runsOn: public/cn-beijing
+        steps:
+          go_build:
+            step: GolangBuild
+            name: 编译后端
+            with:
+              run: |
+                cd backend
+                export GOPROXY=https://goproxy.cn,direct
+                go build -o domain-snatch ./api/domain.go
+                mkdir -p ../_release/etc
+                mv domain-snatch ../_release/
+                cp etc/*.yaml ../_release/etc/
+                cp ../deploy/deploy.sh ../_release/
+          upload:
+            step: ArtifactUpload
+            name: 上传制品
+            with:
+              uploadType: flowPublic
+              artifact: default
+              filePath: _release/
+  deploy_stage:
+    name: 部署到 ECS
+    jobs:
+      deploy_job:
+        name: 主机部署
+        component: VMDeploy
+        with:
+          artifact: $[stages.build_stage.build_job.upload.artifacts.default]
+          machineGroup: "<请填写主机组 ID>"
+          artifactDownloadPath: /home/admin/app/package.tgz
+          executeUser: root
+          run: |
+            mkdir -p /home/admin/application
+            tar zxvf /home/admin/app/package.tgz -C /home/admin/application
+            APP_DIR=/home/admin/application/_release
+            [ -d "$APP_DIR" ] || APP_DIR=/home/admin/application
+            chmod +x "$APP_DIR/deploy.sh"
+            "$APP_DIR/deploy.sh" restart

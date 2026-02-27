@@ -25,12 +25,19 @@ type Contact struct {
 	Country      string
 }
 
-// Executor 统一抢注执行器：先发「开始抢注」通知，再执行 WHOIS + 可选 GoDaddy 注册
+// Platform 抢注平台常量
+const (
+	PlatformGoDaddy   = "godaddy"
+	PlatformDropCatch = "dropcatch"
+)
+
+// Executor 统一抢注执行器：先发「开始抢注」通知，再执行 WHOIS，再按配置平台（godaddy/dropcatch）注册或下 backorder
 type Executor struct {
 	GodaddyClient   *godaddy.Client
 	WebhookURL      string
 	Contact         Contact
 	MaxRetries      int
+	Platform        string // 默认平台，与 config AutoSnatch.Platform 一致；任务 target_registrar 可覆盖
 	SnatchTasks     model.SnatchTasksModel
 	NotifyLogs      model.NotifyLogsModel
 }
@@ -55,12 +62,38 @@ func (e *Executor) Execute(ctx context.Context, task *model.SnatchTasks) error {
 		return nil // 仍不可注册，不更新任务状态
 	}
 
-	// 3. 可注册：自动注册或仅更新为 processing
-	if task.AutoRegister == 1 && e.GodaddyClient != nil && e.MaxRetries > 0 {
-		return e.doRegister(ctx, task)
+	// 3. 可注册：按配置平台选择执行（任务 target_registrar 优先，否则用 Platform）
+	platform := task.TargetRegistrar
+	if platform == "" {
+		platform = e.Platform
+	}
+	if platform == "" {
+		platform = PlatformGoDaddy
 	}
 
-	// 手动模式
+	if task.AutoRegister == 1 && e.MaxRetries > 0 {
+		switch platform {
+		case PlatformGoDaddy:
+			if e.GodaddyClient != nil {
+				return e.doRegister(ctx, task)
+			}
+		case PlatformDropCatch:
+			// DropCatch 客户端待实现时在此调用；暂无则走手动
+			task.Status = "processing"
+			task.Result = sql.NullString{String: "域名已可注册，平台为 dropcatch 暂未接入，请手动抢注", Valid: true}
+			_ = e.SnatchTasks.Update(ctx, task)
+			if e.WebhookURL != "" {
+				client := feishu.NewClient(e.WebhookURL)
+				_ = client.SendSnatchResultCard(task.Domain, "processing", "平台 dropcatch 暂未接入，请手动抢注")
+				e.insertNotifyLog(ctx, task, "snatch_result", "域名 "+task.Domain+" 已可注册，请手动抢注")
+			}
+			return nil
+		default:
+			// 未知平台按手动处理
+		}
+	}
+
+	// 手动模式或未配置对应客户端
 	task.Status = "processing"
 	task.Result = sql.NullString{String: "域名已可注册，请尽快手动完成注册", Valid: true}
 	_ = e.SnatchTasks.Update(ctx, task)
@@ -101,11 +134,13 @@ func (e *Executor) doRegister(ctx context.Context, task *model.SnatchTasks) erro
 		Email:        e.Contact.Email,
 		Phone:        e.Contact.Phone,
 		Organization: e.Contact.Organization,
-		Address1:     e.Contact.Address1,
-		City:         e.Contact.City,
-		State:        e.Contact.State,
-		PostalCode:   e.Contact.PostalCode,
-		Country:      e.Contact.Country,
+		AddressMailing: godaddy.Address{
+			Address1:   e.Contact.Address1,
+			City:       e.Contact.City,
+			State:      e.Contact.State,
+			PostalCode: e.Contact.PostalCode,
+			Country:    e.Contact.Country,
+		},
 	}
 
 	purchaseResp, err := e.GodaddyClient.Purchase(task.Domain, contact, 1)

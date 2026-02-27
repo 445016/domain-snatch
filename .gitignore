@@ -22,6 +22,9 @@ node_modules
 dist
 dist-ssr
 *.local
+_release
+backend/release
+backend/build
 
 # Go
 *.exe

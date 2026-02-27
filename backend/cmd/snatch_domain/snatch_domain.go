@@ -30,6 +30,7 @@ type config struct {
 	}
 	AutoSnatch struct {
 		Enabled    bool
+		Platform   string // godaddy / dropcatch
 		MaxRetries int
 		Contact    struct {
 			FirstName    string
@@ -93,9 +94,14 @@ func main() {
 		maxRetries = 3
 	}
 
+	platform := cfg.AutoSnatch.Platform
+	if platform == "" {
+		platform = snatch.PlatformGoDaddy
+	}
 	exec := &snatch.Executor{
 		GodaddyClient: godaddyClient,
 		WebhookURL:    webhookURL,
+		Platform:      platform,
 		SnatchTasks:   snatchModel,
 		NotifyLogs:    notifyLogsModel,
 		MaxRetries:    maxRetries,

@@ -45,6 +45,7 @@ type ContactInfo struct {
 // AutoSnatchConfig 自动抢注配置
 type AutoSnatchConfig struct {
 	Enabled        bool
+	Platform       string // 抢注平台: godaddy / dropcatch
 	MaxRetries     int
 	CheckIntervals CheckIntervals
 	Contact        ContactInfo
@@ -112,6 +113,10 @@ func (s *CronService) buildExecutor(settings *model.NotifySettings) *snatch.Exec
 		exec.WebhookURL = settings.WebhookUrl
 	}
 	if s.autoSnatchConfig != nil {
+		exec.Platform = s.autoSnatchConfig.Platform
+		if exec.Platform == "" {
+			exec.Platform = snatch.PlatformGoDaddy
+		}
 		exec.MaxRetries = s.autoSnatchConfig.MaxRetries
 		if exec.MaxRetries <= 0 {
 			exec.MaxRetries = 3

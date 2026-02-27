@@ -28,6 +28,7 @@ type Config struct {
 	}
 	AutoSnatch struct {
 		Enabled        bool
+		Platform       string `json:",default=godaddy"` // 抢注平台: godaddy / dropcatch（任务未指定 target_registrar 时使用）
 		MaxRetries     int
 		CheckIntervals struct {
 			Registered    int // 秒

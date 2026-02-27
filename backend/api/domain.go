@@ -63,6 +63,7 @@ func main() {
 	})
 	cronSvc.SetAutoSnatchConfig(cron.AutoSnatchConfig{
 		Enabled:    c.AutoSnatch.Enabled,
+		Platform:   c.AutoSnatch.Platform,
 		MaxRetries: c.AutoSnatch.MaxRetries,
 		CheckIntervals: cron.CheckIntervals{
 			Registered:    c.AutoSnatch.CheckIntervals.Registered,

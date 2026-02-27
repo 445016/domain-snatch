@@ -36,6 +36,7 @@ GoDaddy:
 
 AutoSnatch:
   Enabled: false
+  Platform: godaddy
   MaxRetries: 3
   CheckIntervals:
     Registered: 86400
