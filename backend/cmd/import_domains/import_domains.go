@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	configFile = flag.String("f", "api/etc/domain.yaml", "项目配置文件路径，用于读取数据库连接")
+	configFile = flag.String("f", "etc/domain.yaml", "配置文件路径（与 api 共用 backend/etc/）")
 	fileFlag   = flag.String("file", "", "要导入的文件路径（支持 .xlsx, .xls, .txt, .csv）")
 )
 
@@ -70,7 +70,7 @@ func main() {
 		return
 	}
 
-	configPath := configutil.ResolveConfigPath(*configFile, "api/etc/domain.yaml")
+	configPath := configutil.ResolveConfigPathWithSearch(*configFile, configutil.DefaultConfigSearchPaths)
 	dataSource, err := configutil.LoadDataSource(configPath)
 	if err != nil {
 		log.Fatal(err)

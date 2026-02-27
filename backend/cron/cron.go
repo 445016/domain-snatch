@@ -1076,10 +1076,10 @@ func (s *CronService) RunStatusUpdateTask() {
 	ctx := context.Background()
 	startTime := time.Now()
 	logx.Infof("[Cron][StatusUpdate] ===== Task started at %s =====", startTime.Format("2006-01-02 15:04:05"))
-	logx.Infof("[Cron][StatusUpdate] Query condition: current status's end time <= NOW() (by status: registered→expiry, expired/grace_period→+30d, redemption→+60d, pending_delete/available→+65d, unknown→expiry NULL)")
+	logx.Infof("[Cron][StatusUpdate] Query: (1) registered 且 (到期<=NOW 或 无到期) (2) 非 registered/restricted 的所有状态")
 
-	// 查询「当前状态的结束时间 <= 当前时间」的域名
-	domains, err := s.domainsModel.FindDomainsWithExpiredOrNullExpiry(ctx)
+	// 待检测域名：1) 已注册且到期<=当前或无到期 2) 除已注册、限制注册外的所有状态
+	domains, err := s.domainsModel.FindDomainsToCheck(ctx)
 	if err != nil {
 		logx.Errorf("[Cron][StatusUpdate] ❌ Query failed: %v", err)
 		logx.Infof("[Cron][StatusUpdate] ===== Task failed at %s (duration: %s) =====",

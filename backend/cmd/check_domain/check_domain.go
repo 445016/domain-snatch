@@ -19,7 +19,7 @@ import (
 )
 
 var (
-	configFile = flag.String("f", "api/etc/domain.yaml", "项目配置文件路径，用于读取数据库连接")
+	configFile = flag.String("f", "etc/domain.yaml", "配置文件路径（与 api 共用 backend/etc/）")
 	domainFlag = flag.String("domain", "", "要检查的域名，例如: example.com（不指定则检查所有或按时间筛选）")
 	timeFlag   = flag.String("time", "", "参考时间：与 cron 一致，只更新「当前状态结束时间≤该时间」的域名。留空或 now=当前时间；或 2006-01-02、2006-01-02 15:04:05。仅在不指定 -domain 时生效")
 	sleepSec   = flag.Int("sleep", 2, "批量模式下，每个域名之间的休眠秒数")
@@ -71,7 +71,7 @@ func init() {
 func main() {
 	flag.Parse()
 
-	configPath := configutil.ResolveConfigPath(*configFile, "api/etc/domain.yaml")
+	configPath := configutil.ResolveConfigPathWithSearch(*configFile, configutil.DefaultConfigSearchPaths)
 	dataSource, err := configutil.LoadDataSource(configPath)
 	if err != nil {
 		log.Fatal(err)
@@ -171,20 +171,20 @@ func checkSingleDomain(ctx context.Context, domainsModel model.DomainsModel, dom
 	}
 }
 
-// checkDomainsByTime 按参考时间筛选：只更新「当前状态结束时间 ≤ refTime」的域名（与 cron 逻辑一致）
+// checkDomainsByTime 按参考时间筛选：与 cron 一致的待检测集合（1) 已注册且到期≤参考时间或无到期 2) 非 registered/restricted）
 func checkDomainsByTime(ctx context.Context, domainsModel model.DomainsModel, refTime time.Time, sleepSec int) {
-	domains, err := domainsModel.FindDomainsWithExpiredOrNullExpiryAsOf(ctx, refTime)
+	domains, err := domainsModel.FindDomainsToCheckAsOf(ctx, refTime)
 	if err != nil {
 		log.Fatalf("按时间查询域名失败: %v", err)
 	}
 	total := len(domains)
 	if total == 0 {
-		fmt.Printf("参考时间 %s 下没有需要更新的域名\n", refTime.Format("2006-01-02 15:04:05"))
+		fmt.Printf("参考时间 %s 下没有需要检测的域名\n", refTime.Format("2006-01-02 15:04:05"))
 		return
 	}
 
 	fmt.Printf("参考时间: %s\n", refTime.Format("2006-01-02 15:04:05"))
-	fmt.Printf("符合条件的域名数: %d（当前状态结束时间 ≤ 参考时间）\n", total)
+	fmt.Printf("待检测域名数: %d（已注册且到期≤参考时间或无到期；或非 registered/restricted）\n", total)
 	fmt.Printf("每个域名间隔约 %d 秒\n\n", sleepSec)
 
 	var success, failed int64
@@ -236,24 +236,28 @@ func checkDomainsByTime(ctx context.Context, domainsModel model.DomainsModel, re
 	fmt.Printf("总耗时: %s\n", time.Since(startTime).Round(time.Second))
 }
 
-// checkAllDomains 检查所有/指定状态的域名
+// checkAllDomains 检查所有/指定状态的域名（待检测集合：1) 已注册且到期≤当前或无到期 2) 非 registered/restricted；-status 在此集合内再筛）
 func checkAllDomains(ctx context.Context, domainsModel model.DomainsModel, sleepSec int, statusFilter string, descOrder bool, limit int64) {
-	// 排序方式
-	sortOrder := "asc"
-	if descOrder {
-		sortOrder = "desc"
-	}
-
-	// 查询数量
-	pageSize := int64(100000)
-	if limit > 0 {
-		pageSize = limit
-	}
-
-	// 查询域名（monitor=-1 表示不过滤监控状态）
-	domains, err := domainsModel.FindList(ctx, 1, pageSize, "", statusFilter, -1, "", "", "id", sortOrder)
+	domains, err := domainsModel.FindDomainsToCheck(ctx)
 	if err != nil {
-		log.Fatalf("查询域名列表失败: %v", err)
+		log.Fatalf("查询待检测域名失败: %v", err)
+	}
+	if statusFilter != "" {
+		filtered := domains[:0]
+		for _, d := range domains {
+			if d.Status == statusFilter {
+				filtered = append(filtered, d)
+			}
+		}
+		domains = filtered
+	}
+	if descOrder {
+		for i, j := 0, len(domains)-1; i < j; i, j = i+1, j-1 {
+			domains[i], domains[j] = domains[j], domains[i]
+		}
+	}
+	if limit > 0 && int64(len(domains)) > limit {
+		domains = domains[:limit]
 	}
 
 	total := len(domains)
@@ -262,10 +266,10 @@ func checkAllDomains(ctx context.Context, domainsModel model.DomainsModel, sleep
 		return
 	}
 
-	// 打印查询条件
-	filterDesc := "所有域名"
+	// 打印查询条件（待检测集合：已注册且到期≤当前或无到期；或非 registered/restricted）
+	filterDesc := "待检测域名"
 	if statusFilter != "" {
-		filterDesc = fmt.Sprintf("状态为 %s 的域名", statusFilter)
+		filterDesc = fmt.Sprintf("状态为 %s 的待检测域名", statusFilter)
 	}
 
 	orderDesc := ""

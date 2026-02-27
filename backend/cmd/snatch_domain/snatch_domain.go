@@ -47,7 +47,7 @@ type config struct {
 }
 
 var (
-	configFile = flag.String("f", "api/etc/domain.yaml", "项目配置文件路径")
+	configFile = flag.String("f", "etc/domain.yaml", "配置文件路径（与 api 共用 backend/etc/）")
 	domainFlag = flag.String("domain", "", "要抢注的域名（与 -task-id 二选一）")
 	taskIDFlag = flag.Int64("task-id", 0, "要执行的抢注任务 ID（与 -domain 二选一）")
 )
@@ -62,7 +62,7 @@ func main() {
 		log.Fatal("-domain 与 -task-id 只能指定其一")
 	}
 
-	configPath := configutil.ResolveConfigPath(*configFile, "api/etc/domain.yaml")
+	configPath := configutil.ResolveConfigPathWithSearch(*configFile, configutil.DefaultConfigSearchPaths)
 	var cfg config
 	if err := conf.Load(configPath, &cfg); err != nil {
 		log.Fatalf("加载配置失败: %v", err)

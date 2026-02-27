@@ -30,6 +30,8 @@ type (
 		FindDomainsWithinMinutesToAvailable(ctx context.Context, minutes int) ([]*Domains, error)
 		FindDomainsWithExpiredOrNullExpiry(ctx context.Context) ([]*Domains, error)
 		FindDomainsWithExpiredOrNullExpiryAsOf(ctx context.Context, asOf time.Time) ([]*Domains, error)
+		FindDomainsToCheck(ctx context.Context) ([]*Domains, error)
+		FindDomainsToCheckAsOf(ctx context.Context, asOf time.Time) ([]*Domains, error)
 		FindPendingDeleteDomainsNearAvailable(ctx context.Context, hoursBefore int) ([]*Domains, error)
 	}
 
@@ -290,6 +292,30 @@ func (m *customDomainsModel) FindDomainsWithinMinutesToAvailable(ctx context.Con
 
 	var resp []*Domains
 	err := m.conn.QueryRowsCtx(ctx, &resp, query, now, thresholdTime)
+	return resp, err
+}
+
+// FindDomainsToCheck 待检测域名（与 RunStatusUpdateTask / check_domain 最终逻辑一致）：
+// 1) 已注册且（到期时间<=当前时间 或 无到期时间）；2) 非限制注册、非已注册（即除 restricted/registered 外的所有状态）
+func (m *customDomainsModel) FindDomainsToCheck(ctx context.Context) ([]*Domains, error) {
+	query := fmt.Sprintf(`SELECT %s FROM %s 
+		WHERE (status = 'registered' AND (expiry_date IS NULL OR expiry_date <= NOW()))
+		   OR (status NOT IN ('registered', 'restricted'))
+		ORDER BY expiry_date ASC, id ASC`, domainsRows, m.table)
+	var resp []*Domains
+	err := m.conn.QueryRowsCtx(ctx, &resp, query)
+	return resp, err
+}
+
+// FindDomainsToCheckAsOf 与 FindDomainsToCheck 相同，但用 asOf 作为参考时间（仅影响 registered 的 expiry_date 比较）
+func (m *customDomainsModel) FindDomainsToCheckAsOf(ctx context.Context, asOf time.Time) ([]*Domains, error) {
+	ref := asOf.Truncate(time.Second)
+	query := fmt.Sprintf(`SELECT %s FROM %s 
+		WHERE (status = 'registered' AND (expiry_date IS NULL OR expiry_date <= ?))
+		   OR (status NOT IN ('registered', 'restricted'))
+		ORDER BY expiry_date ASC, id ASC`, domainsRows, m.table)
+	var resp []*Domains
+	err := m.conn.QueryRowsCtx(ctx, &resp, query, ref)
 	return resp, err
 }
 

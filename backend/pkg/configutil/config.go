@@ -10,8 +10,10 @@ import (
 	"github.com/zeromicro/go-zero/core/conf"
 )
 
+// DefaultConfigSearchPaths 默认配置搜索顺序：从 backend 或 backend/api 执行都能找到 backend/etc/。
+var DefaultConfigSearchPaths = []string{"etc/domain.yaml", "../etc/domain.yaml"}
+
 // ResolveConfigPath 支持多环境：当 explicitPath 等于 defaultPath 时，若设置了 APP_ENV 则优先使用同目录下的 {name}-{APP_ENV}.yaml。
-// 例如 defaultPath=etc/domain.yaml、APP_ENV=prod 且存在 etc/domain-prod.yaml 时返回 etc/domain-prod.yaml。
 func ResolveConfigPath(explicitPath, defaultPath string) string {
 	if explicitPath != defaultPath {
 		return explicitPath
@@ -29,6 +31,27 @@ func ResolveConfigPath(explicitPath, defaultPath string) string {
 		return envPath
 	}
 	return explicitPath
+}
+
+// ResolveConfigPathWithSearch 当使用默认配置时，按 searchPaths 顺序找第一个存在的文件并应用 APP_ENV，支持从 backend 或 backend/api 执行。
+func ResolveConfigPathWithSearch(explicitPath string, searchPaths []string) string {
+	var isDefault bool
+	for _, p := range searchPaths {
+		if explicitPath == p {
+			isDefault = true
+			break
+		}
+	}
+	if !isDefault {
+		return ResolveConfigPath(explicitPath, explicitPath)
+	}
+	for _, p := range searchPaths {
+		resolved := ResolveConfigPath(p, p)
+		if _, err := os.Stat(resolved); err == nil {
+			return resolved
+		}
+	}
+	return ResolveConfigPath(searchPaths[0], searchPaths[0])
 }
 
 // DBConfig 仅包含数据库连接配置，与 api/etc/domain.yaml 中 Mysql 段结构一致。
